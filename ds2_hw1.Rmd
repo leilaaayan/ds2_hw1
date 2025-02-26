@@ -1,0 +1,261 @@
+---
+title: "ds2_hw1"
+author: "Leila Yan"
+date: "2025-02-26"
+output: html_document
+---
+
+Load libraries
+```{r}
+library(caret)
+library(tidymodels) 
+library(kknn)
+library(FNN) 
+library(learnr)
+library(readr)
+library(glmnet)
+library(dplyr)
+library(pls)
+```
+
+(a) Fit a lasso model on the training data. Report the selected tuning parameter and the test error. When the 1SE rule is applied, how many predictors are included in the model?
+
+```{r}
+#Read in the csv file
+training_data <- read.csv("housing_training.csv")
+set.seed(2)
+
+ctrl <- trainControl(method = "cv", number = 10)
+
+
+lasso_fit <- train(Sale_Price ~ ., 
+                   data = training_data, 
+                   method = "glmnet",
+                   tuneGrid = expand.grid(alpha = 1, 
+                                          lambda = exp(seq(6, 0, length = 100))),
+                   trControl = ctrl)
+
+
+best_lambda <- lasso_fit$bestTune$lambda
+cat("Best Lambda:", best_lambda, "\n")
+
+plot(lasso_fit, xTrans = log)
+
+final_coefs <- coef(lasso_fit$finalModel, lasso_fit$bestTune$lambda)
+print(final_coefs)
+
+# Number of predictors
+num_predictors <- sum(final_coefs != 0) - 1
+cat("Number of predictors selected:", num_predictors, "\n")
+
+# Calculate test error
+preds <- predict(lasso_fit, newdata = training_data)
+test_error <- mean((training_data$Sale_Price - preds)^2)
+cat("Test Error (MSE):", test_error, "\n")
+```
+
+
+```{r}
+# Apply the 1SE Rule
+cv_model <- cv.glmnet(as.matrix(training_data[,-which(names(training_data)=="Sale_Price")]), 
+                      training_data$Sale_Price, alpha = 1)
+
+best_lambda_1se <- cv_model$lambda.1se
+cat("Lambda using 1SE rule:", best_lambda_1se, "\n")
+
+# Coefficients under the 1SE rule
+final_coefs_1se <- coef(cv_model, s = best_lambda_1se)
+print(final_coefs_1se)
+
+# Count predictors under the 1SE rule
+num_predictors_1se <- sum(final_coefs_1se != 0) - 1
+cat("Number of predictors under 1SE rule:", num_predictors_1se, "\n")
+
+```
+The selected tuning parameter which is the best lambda is 48.37. Test error is 47,956,695.81.When the 1SE rule is applied, there are 15 predictors.
+
+
+(b) Fit an elastic net model on the training data. Report the selected tuning parameters and the test error. Is it possible to apply the 1SE rule to select the tuning parame- ters for elastic net? If the 1SE rule is applicable, implement it to select the tuning parameters. If not, explain why.
+
+```{r}
+training_data <- na.omit(training_data)
+
+str(training_data)
+```
+
+```{r}
+set.seed(2)
+
+# Cross-validation control
+ctrl <- trainControl(method = "cv", number = 10)
+
+# Fit the elastic net model
+enet_fit <- train(Sale_Price ~ ., 
+                  data = training_data, 
+                  method = "glmnet",
+                  tuneGrid = expand.grid(alpha = seq(0, 1, length = 21),  # Elastic Net tuning
+                                         lambda = exp(seq(6, 0, length = 100))),  # Lambda tuning
+                  trControl = ctrl)
+
+# Print the best tuning parameters
+best_params <- enet_fit$bestTune
+cat("Best Alpha:", best_params$alpha, "\nBest Lambda:", best_params$lambda, "\n")
+```
+
+The selected tuning parameter (best lambda) is 280.4411.
+
+```{r}
+# Plot the elastic net tuning results
+myCol <- rainbow(25)
+myPar <- list(superpose.symbol = list(col = myCol),
+              superpose.line = list(col = myCol))
+
+plot(enet_fit, par.settings = myPar, xTrans = log)
+```
+
+```{r}
+# Generate predictions
+preds <- predict(enet_fit, newdata = training_data)
+
+# Calculate the test error 
+test_error <- mean((training_data$Sale_Price - preds)^2)
+cat("Test Error (MSE):", test_error, "\n")
+```
+The test error is 479831877. 
+
+```{r}
+# Apply 1SE rule
+x <- as.matrix(training_data[ , -which(names(training_data) == "Sale_Price")])
+y <- training_data$Sale_Price
+
+cv_enet <- cv.glmnet(x, y, alpha = best_params$alpha)
+
+lambda_1se <- cv_enet$lambda.1se
+cat("Lambda under 1SE rule:", lambda_1se, "\n")
+
+final_coefs_1se <- coef(cv_enet, s = lambda_1se)
+print(final_coefs_1se)
+
+# Count number of predictors under 1 SE rule
+num_predictors_1se <- sum(final_coefs_1se != 0) - 1
+cat("Number of predictors under 1SE rule:", num_predictors_1se, "\n")
+```
+Yes, the 1 SE rule can be applied. And under 1 SE rule, there are 17 predictors.
+
+(c) Fit a partial least squares model on the training data and report the test error. How many components are included in your model?
+
+```{r}
+testing_data <- read.csv("housing_test.csv")
+```
+
+
+
+```{r}
+set.seed(2)
+
+# Fit the PLS model with cross-validation
+pls_mod <- plsr(Sale_Price ~ ., 
+                data = training_data, 
+                scale = TRUE,         
+                validation = "CV")    
+
+summary(pls_mod)
+```
+
+
+```{r}
+# Calculate RMSEP
+cv_mse <- RMSEP(pls_mod)
+
+# Determine the optimal number of components
+ncomp_cv <- which.min(cv_mse$val[1, , ]) - 1
+
+# Display the selected number of components
+cat("Optimal number of components:", ncomp_cv, "\n")
+```
+
+Eight components are included in my model.
+
+
+```{r}
+predy2_pls <- predict(pls_mod, newdata = testing_data, ncomp = ncomp_cv)
+
+# Calculate the test error
+test_error_pls <- mean((testing_data$Sale_Price - predy2_pls)^2)
+
+
+cat("Test Error (MSE):", test_error_pls, "\n")
+
+plot(cv_mse, legendpos = "topright")
+```
+
+The test error is 440217938.
+
+
+(d) Choose the best model for predicting the response and explain your choice.
+
+The best model for predicting the response is the Lasso regression model.I chose this model because it has the lowest test error (47,956,695.81), and the 1SE rule reduces model complexity by selecting 15 predictors, balancing prediction accuracy and model interpretability.
+
+
+(e) If R package “caret” was used for the lasso in (a), retrain this model using R package “glmnet”, and vice versa. Compare the selected tuning parameters between the two software approaches. Should there be discrepancies in the chosen parameters, discuss potential reasons for these differences.
+
+```{r}
+# Fit Lasso model using glmnet
+x_train <- as.matrix(training_data[, -which(names(training_data) == "Sale_Price")])
+y_train <- training_data$Sale_Price
+
+set.seed(2)
+lasso_glmnet <- cv.glmnet(x_train, y_train, alpha = 1)
+
+# Extract the lambda values
+best_lambda_glmnet <- lasso_glmnet$lambda.min
+best_lambda_glmnet_1se <- lasso_glmnet$lambda.1se
+
+cat("glmnet - Lambda.min:", best_lambda_glmnet, "\n")
+cat("glmnet - Lambda.1se:", best_lambda_glmnet_1se, "\n")
+
+# Coefficients of glmnet model
+glmnet_coefs <- coef(lasso_glmnet, s = "lambda.min")
+print(glmnet_coefs)
+```
+
+
+```{r}
+# Fit Lasso model using caret
+ctrl <- trainControl(method = "cv", number = 10)
+
+set.seed(2)
+lasso_caret <- train(Sale_Price ~ ., 
+                     data = training_data,
+                     method = "glmnet",
+                     tuneGrid = expand.grid(alpha = 1, 
+                                            lambda = exp(seq(6, 0, length = 100))),
+                     trControl = ctrl)
+
+# Extract the best lambda 
+best_lambda_caret <- lasso_caret$bestTune$lambda
+
+cat("caret - Best Lambda:", best_lambda_caret, "\n")
+
+# Coefficients of caret model
+caret_coefs <- coef(lasso_caret$finalModel, s = lasso_caret$bestTune$lambda)
+print(caret_coefs)
+```
+
+```{r}
+# Compare the lambda values
+cat("\nComparison of Lambda Values:\n")
+cat("glmnet: Lambda.min:", best_lambda_glmnet, "\n")
+cat("glmnet: Lambda.1se:", best_lambda_glmnet_1se, "\n")
+cat("caret: Best Lambda:", best_lambda_caret, "\n")
+
+# Compare the coefficients
+nonzero_glmnet <- sum(glmnet_coefs != 0) - 1
+nonzero_caret <- sum(caret_coefs != 0) - 1
+
+cat("\nNumber of non-zero coefficients:\n")
+cat("glmnet:", nonzero_glmnet, "\n")
+cat("caret:", nonzero_caret, "\n")
+```
+
+Discrepancies in the chosen parameters between the glmnet and caret models are expected due to differences in cross-validation strategies, grid search methods, and preprocessing defaults. "Caret" selected a lambda of 48.37 with 37 non-zero predictors, while "glmnet" selected a lambda of 107.18 with 20 non-zero predictors. These differences likely stem from caret using a predefined lambda grid and potentially different resampling procedures compared to glmnet's adaptive lambda selection.
