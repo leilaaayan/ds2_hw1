@@ -12,6 +12,10 @@ library(caret)
 library(tidymodels) 
 library(kknn)
 library(FNN) 
+library(corrplot)
+library(ggplot2)
+library(plotmo)
+library(ggrepel)
 library(learnr)
 library(readr)
 library(glmnet)
@@ -26,6 +30,7 @@ library(pls)
 training_data <- read.csv("housing_training.csv")
 set.seed(2)
 
+#Define cross-validation control
 ctrl <- trainControl(method = "cv", number = 10)
 
 
@@ -33,7 +38,7 @@ lasso_fit <- train(Sale_Price ~ .,
                    data = training_data, 
                    method = "glmnet",
                    tuneGrid = expand.grid(alpha = 1, 
-                                          lambda = exp(seq(6, 0, length = 100))),
+                                          lambda = exp(seq(-5, 10, length = 100))),
                    trControl = ctrl)
 
 
@@ -42,7 +47,7 @@ cat("Best Lambda:", best_lambda, "\n")
 
 plot(lasso_fit, xTrans = log)
 
-final_coefs <- coef(lasso_fit$finalModel, lasso_fit$bestTune$lambda)
+final_coefs <- coef(lasso_fit$finalModel, best_lambda)
 print(final_coefs)
 
 # Number of predictors
@@ -57,12 +62,31 @@ cat("Test Error (MSE):", test_error, "\n")
 
 
 ```{r}
-# Apply the 1SE Rule
+# Apply the 1SE Rule & Cross-Validation Visualization
 cv_model <- cv.glmnet(as.matrix(training_data[,-which(names(training_data)=="Sale_Price")]), 
-                      training_data$Sale_Price, alpha = 1)
+                      training_data$Sale_Price, 
+                      alpha = 1, 
+                      lambda = exp(seq(-5, 10, length = 100)))
 
 best_lambda_1se <- cv_model$lambda.1se
 cat("Lambda using 1SE rule:", best_lambda_1se, "\n")
+
+#Find log(lambda) values and MSE
+log_lambda <- log(cv_model$lambda)
+mse_values <- cv_model$cvm
+mse_std_error <- cv_model$cvsd  
+
+#Plot
+plot(log_lambda, mse_values, type = "b", pch = 16, col = "red",
+     ylab = "Mean-Squared Error", xlab = "Log(λ)", main = "Cross-Validation MSE vs Log Lambda")
+
+#Add error bars
+arrows(log_lambda, mse_values - mse_std_error, log_lambda, mse_values + mse_std_error, 
+       angle = 90, code = 3, length = 0.05, col = "gray")
+
+abline(h = (cv_model$cvm + cv_model$cvsd)[which.min(cv_model$cvm)], col = "blue", lwd = 2)
+abline(v = log(cv_model$lambda.min), col = "black", lty = 2)
+abline(v = log(cv_model$lambda.1se), col = "black", lty = 2)
 
 # Coefficients under the 1SE rule
 final_coefs_1se <- coef(cv_model, s = best_lambda_1se)
